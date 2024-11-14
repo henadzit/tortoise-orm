@@ -24,7 +24,7 @@ from pypika import JoinType, Order, Table
 from pypika.analytics import Count
 from pypika.functions import Cast
 from pypika.queries import QueryBuilder
-from pypika.terms import Case, Field, Term, ValueWrapper
+from pypika.terms import Case, Field, Term, ValueWrapper, Parameterizer
 from typing_extensions import Literal, Protocol
 
 from tortoise.backends.base.client import BaseDBAsyncClient, Capabilities
@@ -282,7 +282,7 @@ class AwaitableQuery(Generic[MODEL]):
 
     def sql(self, **kwargs) -> str:
         """Return the actual SQL."""
-        return self.as_query().get_sql(**kwargs)
+        return self.as_query().get_sql(parameterizer=Parameterizer(), **kwargs)
 
     def as_query(self) -> QueryBuilder:
         """Return the actual query."""
@@ -1092,9 +1092,9 @@ class QuerySet(AwaitableQuery[MODEL]):
         )
         self.resolve_filters()
         if self._limit is not None:
-            self.query._limit = self._limit
-        if self._offset:
-            self.query._offset = self._offset
+            self.query._limit = self.query._wrapper_cls(self._limit)
+        if self._offset is not None:
+            self.query._offset = self.query._wrapper_cls(self._offset)
         if self._distinct:
             self.query._distinct = True
         if self._select_for_update:
@@ -1131,13 +1131,19 @@ class QuerySet(AwaitableQuery[MODEL]):
             yield val
 
     async def _execute(self) -> List[MODEL]:
+        parameterizer = Parameterizer()
+        sql = self.query.get_sql(parameterizer=parameterizer)
         instance_list = await self._db.executor_class(
             model=self.model,
             db=self._db,
             prefetch_map=self._prefetch_map,
             prefetch_queries=self._prefetch_queries,
             select_related_idx=self._select_related_idx,
-        ).execute_select(self.query, custom_fields=list(self._annotations.keys()))
+        ).execute_select(
+            sql,
+            parameterizer.values,
+            custom_fields=list(self._annotations.keys()),
+        )
         if self._single:
             if len(instance_list) == 1:
                 return instance_list[0]
@@ -1182,7 +1188,7 @@ class UpdateQuery(AwaitableQuery):
         table = self.model._meta.basetable
         self.query = self._db.query_class.update(table)
         if self.capabilities.support_update_limit_order_by and self._limit:
-            self.query._limit = self._limit
+            self.query._limit = self.query._wrapper_cls(self._limit)
             self.resolve_ordering(self.model, table, self._orderings, self._annotations)
 
         self.resolve_filters()
@@ -1265,7 +1271,7 @@ class DeleteQuery(AwaitableQuery):
     def _make_query(self) -> None:
         self.query = copy(self.model._meta.basequery)
         if self.capabilities.support_update_limit_order_by and self._limit:
-            self.query._limit = self._limit
+            self.query._limit = self.query._wrapper_cls(self._limit)
             self.resolve_ordering(
                 model=self.model,
                 table=self.model._meta.basetable,
@@ -1312,7 +1318,7 @@ class ExistsQuery(AwaitableQuery):
     def _make_query(self) -> None:
         self.query = copy(self.model._meta.basequery)
         self.resolve_filters()
-        self.query._limit = 1
+        self.query._limit = self.query._wrapper_cls(1)
         self.query._select_other(ValueWrapper(1))
 
         if self._force_indexes:
@@ -1580,9 +1586,9 @@ class ValuesListQuery(FieldSelectQuery, Generic[SINGLE]):
         )
         self.resolve_filters()
         if self._limit:
-            self.query._limit = self._limit
+            self.query._limit = self.query._wrapper_cls(self._limit)
         if self._offset:
-            self.query._offset = self._offset
+            self.query._offset = self.query._wrapper_cls(self._offset)
         if self._distinct:
             self.query._distinct = True
         if self._group_bys:
@@ -1708,9 +1714,9 @@ class ValuesQuery(FieldSelectQuery, Generic[SINGLE]):
         ]
 
         if self._limit:
-            self.query._limit = self._limit
+            self.query._limit = self.query._wrapper_cls(self._limit)
         if self._offset:
-            self.query._offset = self._offset
+            self.query._offset = self.query._wrapper_cls(self._offset)
         if self._distinct:
             self.query._distinct = True
         if self._group_bys:
@@ -1787,7 +1793,7 @@ class RawSQLQuery(AwaitableQuery):
         instance_list = await self._db.executor_class(
             model=self.model,
             db=self._db,
-        ).execute_select(self.query)
+        ).execute_select(self.query.get_sql())
         return instance_list
 
     def __await__(self) -> Generator[Any, None, List[MODEL]]:
@@ -1832,7 +1838,7 @@ class BulkUpdateQuery(UpdateQuery, Generic[MODEL]):
         table = self.model._meta.basetable
         self.query = self._db.query_class.update(table)
         if self.capabilities.support_update_limit_order_by and self._limit:
-            self.query._limit = self._limit
+            self.query._limit = self.query._wrapper_cls(self._limit)
             self.resolve_ordering(
                 model=self.model,
                 table=table,
