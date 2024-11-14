@@ -94,7 +94,7 @@ class BaseExecutor:
             table = self.model._meta.basetable
             self.delete_query = str(
                 self.model._meta.basequery.where(
-                    table[self.model._meta.db_pk_column] == self.parameter(0)
+                    table[self.model._meta.db_pk_column] == Parameter(idx=1)
                 ).delete()
             )
             self.update_cache: Dict[str, str] = {}
@@ -188,16 +188,13 @@ class BaseExecutor:
         query = (
             self.db.query_class.into(self.model._meta.basetable)
             .columns(*columns)
-            .insert(*[self.parameter(i) for i in range(len(columns))])
+            .insert(*[Parameter(idx=i + 1) for i in range(len(columns))])
         )
         if ignore_conflicts:
             query = query.on_conflict().do_nothing()
         return query
 
     async def _process_insert_result(self, instance: "Model", results: Any) -> None:
-        raise NotImplementedError()  # pragma: nocoverage
-
-    def parameter(self, pos: int) -> Parameter:
         raise NotImplementedError()  # pragma: nocoverage
 
     async def execute_insert(self, instance: "Model") -> None:
@@ -260,14 +257,14 @@ class BaseExecutor:
         expressions = expressions or {}
         table = self.model._meta.basetable
         query = self.db.query_class.update(table)
-        count = 0
+        parameter_idx = 1
         for field in update_fields or self.model._meta.fields_db_projection.keys():
             db_column = self.model._meta.fields_db_projection[field]
             field_object = self.model._meta.fields_map[field]
             if not field_object.pk:
                 if field not in expressions.keys():
-                    query = query.set(db_column, self.parameter(count))
-                    count += 1
+                    query = query.set(db_column, Parameter(idx=parameter_idx))
+                    parameter_idx += 1
                 else:
                     value = (
                         expressions[field]
@@ -283,7 +280,7 @@ class BaseExecutor:
                     )
                     query = query.set(db_column, value)
 
-        query = query.where(table[self.model._meta.db_pk_column] == self.parameter(count))
+        query = query.where(table[self.model._meta.db_pk_column] == Parameter(idx=parameter_idx))
 
         sql = query.get_sql()
         if not expressions:
