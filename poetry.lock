@@ -2746,7 +2746,7 @@ develop = false
 type = "git"
 url = "https://github.com/henadzit/pypika-tortoise.git"
 reference = "more-perf-improvs"
-resolved_reference = "9abd7623e5a7ae6eabb1922284a5c24215ceed21"
+resolved_reference = "4547dba2ec1286ca38ac6b9422b67560855b4aa1"
 
 [[package]]
 name = "pytest"
